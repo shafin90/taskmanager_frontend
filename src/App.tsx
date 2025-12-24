@@ -29,6 +29,8 @@ type Task = {
   assignedTo?: string; // userId
   isCompleted: boolean;
   orgId: string;
+  parentTaskId?: string;
+  estimatedHours?: number;
 };
 
 type Designation = {
@@ -48,6 +50,18 @@ type Target = {
   dueDate?: string;
 };
 
+type Report = {
+  _id: string;
+  requesterId: string;
+  responderId: string;
+  taskId?: string;
+  requestMessage: string;
+  responseMessage?: string;
+  status: 'REQUESTED' | 'SUBMITTED' | 'REVIEWED';
+  grade?: number;
+  createdAt: string;
+};
+
 type ChatMessage = {
   _id: string;
   senderId: string;
@@ -57,6 +71,7 @@ type ChatMessage = {
 };
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+
 
 function App() {
   const [mode, setMode] = useState<'login' | 'register'>('login');
@@ -70,12 +85,20 @@ function App() {
   const [orgUsers, setOrgUsers] = useState<OrgUser[]>([]);
   const [designations, setDesignations] = useState<Designation[]>([]);
   const [targets, setTargets] = useState<Target[]>([]);
+  const [reports, setReports] = useState<Report[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [summary, setSummary] = useState<{ total: number; done: number; open: number; perUser: any[] }>({
+  const [summary, setSummary] = useState<{
+    total: number;
+    done: number;
+    open: number;
+    perUser: any[];
+    reportStats: any[];
+  }>({
     total: 0,
     done: 0,
     open: 0,
     perUser: [],
+    reportStats: [],
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -91,7 +114,7 @@ function App() {
   const [search, setSearch] = useState('');
   const [viewMode, setViewMode] = useState<'board' | 'list'>('board');
   const [activeMenu, setActiveMenu] = useState<
-    'tasks' | 'designation' | 'employees' | 'target' | 'assign' | 'progress' | 'chat'
+    'tasks' | 'designation' | 'employees' | 'target' | 'assign' | 'progress' | 'chat' | 'reports'
   >('tasks');
 
   // Organization setup forms (owner only)
@@ -161,12 +184,12 @@ function App() {
 
   const authHeaders: Record<string, string> = token
     ? {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      }
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    }
     : {
-        'Content-Type': 'application/json',
-      };
+      'Content-Type': 'application/json',
+    };
 
   const authFetch = async (url: string, options?: RequestInit) => {
     const res = await fetch(url, {
@@ -228,7 +251,19 @@ function App() {
   };
 
   const fetchBootstrap = async () => {
-    await Promise.all([fetchTasks(), fetchOrgUsers(), fetchDesignations(), fetchTargets(), fetchMessages(), fetchSummary()]);
+    await Promise.all([fetchTasks(), fetchOrgUsers(), fetchDesignations(), fetchTargets(), fetchMessages(), fetchSummary(), fetchReports()]);
+  };
+
+  const fetchReports = async () => {
+    if (!token) return;
+    try {
+      const res = await authFetch(`${API_URL}/reports`);
+      if (!res.ok) throw new Error('Failed to load reports');
+      const data = await res.json();
+      setReports(data || []);
+    } catch (err) {
+      console.warn(err);
+    }
   };
 
   const fetchTasks = async () => {
@@ -319,10 +354,21 @@ function App() {
   const fetchSummary = async () => {
     if (!token || user?.role !== 'owner') return;
     try {
-      const res = await authFetch(`${API_URL}/tasks/summary/org`);
-      if (!res.ok) throw new Error('Failed to load summary');
-      const data = await res.json();
-      setSummary(data || { total: 0, done: 0, open: 0, perUser: [] });
+      const [resTask, resRep] = await Promise.all([
+        authFetch(`${API_URL}/tasks/summary/org`),
+        authFetch(`${API_URL}/reports/stats/org`)
+      ]);
+
+      const taskData = resTask.ok ? await resTask.json() : {};
+      const repData = resRep.ok ? await resRep.json() : [];
+
+      setSummary({
+        total: taskData.total || 0,
+        done: taskData.done || 0,
+        open: taskData.open || 0,
+        perUser: taskData.perUser || [],
+        reportStats: repData || []
+      });
     } catch (err) {
       console.warn(err);
     }
@@ -573,6 +619,7 @@ function App() {
           targetDue,
           chatText,
           chatRecipient,
+          reports,
         }}
         actions={{
           setMode,
@@ -616,6 +663,7 @@ function App() {
           setTargetDue,
           setChatText,
           setChatRecipient,
+          setReports,
         }}
         handlers={{
           handleLogin,
@@ -640,6 +688,8 @@ function App() {
           totals: { open, completed, total },
           allowedAssignees,
           userMap,
+          authFetch,
+          fetchReports,
         }}
       />
     </BrowserRouter>
@@ -660,7 +710,7 @@ type AppState = {
   designations: Designation[];
   targets: Target[];
   messages: ChatMessage[];
-  summary: { total: number; done: number; open: number; perUser: any[] };
+  summary: { total: number; done: number; open: number; perUser: any[]; reportStats: any[] };
   loading: boolean;
   error: string | null;
   info: string | null;
@@ -673,7 +723,7 @@ type AppState = {
   filterStatus: Task['status'] | '';
   search: string;
   viewMode: 'board' | 'list';
-  activeMenu: 'tasks' | 'designation' | 'employees' | 'target' | 'assign' | 'progress' | 'chat';
+  activeMenu: 'tasks' | 'designation' | 'employees' | 'target' | 'assign' | 'progress' | 'chat' | 'reports';
   desigName: string;
   desigDesc: string;
   desigRole: 'senior' | 'junior' | 'mid-level' | 'fresher';
@@ -689,6 +739,7 @@ type AppState = {
   targetDue: string;
   chatText: string;
   chatRecipient: string;
+  reports: Report[];
 };
 
 type AppActions = {
@@ -704,7 +755,8 @@ type AppActions = {
   setDesignations: (v: Designation[]) => void;
   setTargets: (v: Target[]) => void;
   setMessages: (v: ChatMessage[]) => void;
-  setSummary: (v: { total: number; done: number; open: number; perUser: any[] }) => void;
+  setReports: (v: Report[]) => void;
+  setSummary: (v: { total: number; done: number; open: number; perUser: any[]; reportStats: any[] }) => void;
   setLoading: (v: boolean) => void;
   setError: (v: string | null) => void;
   setInfo: (v: string | null) => void;
@@ -758,6 +810,8 @@ type AppHandlers = {
   totals: { open: number; completed: number; total: number };
   allowedAssignees: OrgUser[];
   userMap: Record<string, OrgUser>;
+  authFetch: (url: string, options?: RequestInit) => Promise<Response>;
+  fetchReports: () => void;
 };
 
 function AppRoutes({
@@ -1096,76 +1150,76 @@ function AppRoutes({
             </button>
           </div>
         </div>
-          {state.token && (
-            <div className="insights" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
-              <div className="pill tiny">
-                <div className="pill-title">Tasks</div>
-                <div className="pill-sub">{handlers.totals.total} total · {handlers.totals.completed} done</div>
-              </div>
-              {state.tasks.length > 0 && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                  <svg width="96" height="96" viewBox="0 0 120 120">
-                    <circle cx="60" cy="60" r="50" fill="none" stroke="#eee" strokeWidth="12" />
-                    <circle
-                      cx="60"
-                      cy="60"
-                      r="50"
-                      fill="none"
-                      stroke="#111"
-                      strokeWidth="12"
-                      strokeDasharray={`${Math.max(
-                        0,
-                        Math.min(100, handlers.totals.total ? Math.round((handlers.totals.completed / handlers.totals.total) * 100) : 0),
-                      )} 100`}
-                      strokeDashoffset="25"
-                      strokeLinecap="round"
-                      transform="rotate(-90 60 60)"
-                    />
-                    <text x="60" y="60" textAnchor="middle" dominantBaseline="middle" fontSize="18" fontWeight="700" fill="#111">
-                      {handlers.totals.total ? Math.round((handlers.totals.completed / handlers.totals.total) * 100) : 0}%
-                    </text>
-                  </svg>
-                  <div className="pill tiny" style={{ flexDirection: 'column', alignItems: 'flex-start' }}>
-                    <div className="pill-title">Progress</div>
-                    <div className="pill-sub">
-                      {handlers.totals.completed} done · {handlers.totals.open} open
-                    </div>
+        {state.token && (
+          <div className="insights" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
+            <div className="pill tiny">
+              <div className="pill-title">Tasks</div>
+              <div className="pill-sub">{handlers.totals.total} total · {handlers.totals.completed} done</div>
+            </div>
+            {state.tasks.length > 0 && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <svg width="96" height="96" viewBox="0 0 120 120">
+                  <circle cx="60" cy="60" r="50" fill="none" stroke="#eee" strokeWidth="12" />
+                  <circle
+                    cx="60"
+                    cy="60"
+                    r="50"
+                    fill="none"
+                    stroke="#111"
+                    strokeWidth="12"
+                    strokeDasharray={`${Math.max(
+                      0,
+                      Math.min(100, handlers.totals.total ? Math.round((handlers.totals.completed / handlers.totals.total) * 100) : 0),
+                    )} 100`}
+                    strokeDashoffset="25"
+                    strokeLinecap="round"
+                    transform="rotate(-90 60 60)"
+                  />
+                  <text x="60" y="60" textAnchor="middle" dominantBaseline="middle" fontSize="18" fontWeight="700" fill="#111">
+                    {handlers.totals.total ? Math.round((handlers.totals.completed / handlers.totals.total) * 100) : 0}%
+                  </text>
+                </svg>
+                <div className="pill tiny" style={{ flexDirection: 'column', alignItems: 'flex-start' }}>
+                  <div className="pill-title">Progress</div>
+                  <div className="pill-sub">
+                    {handlers.totals.completed} done · {handlers.totals.open} open
                   </div>
                 </div>
-              )}
-            </div>
-          )}
-          {state.token && (
-            <div className="panel" style={{ marginTop: 8 }}>
-              <div className="panel-header">
-                <div className="panel-title">
-                  <h2>My assigned tasks</h2>
-                  <span className="muted">Tasks assigned to you</span>
-                </div>
               </div>
-              {state.user && state.tasks.filter((t) => t.assignedTo === state.user?.id).length === 0 && (
-                <p className="muted">No tasks assigned to you yet.</p>
-              )}
-              <div className="board">
-                {state.user &&
-                  state.tasks
-                    .filter((t) => t.assignedTo === state.user?.id)
-                    .map((task) => (
-                      <div key={task._id} className="task-card">
-                        <div className="task-title">{task.title}</div>
-                        {task.description && <div className="task-desc">{task.description}</div>}
-                        <div className="task-meta">
-                          <span>Status: {task.status}</span>
-                          <span>Due: {new Date(task.dueDate).toLocaleDateString()}</span>
-                          {task.priority && <span>Priority {task.priority}</span>}
-                        </div>
+            )}
+          </div>
+        )}
+        {state.token && (
+          <div className="panel" style={{ marginTop: 8 }}>
+            <div className="panel-header">
+              <div className="panel-title">
+                <h2>My assigned tasks</h2>
+                <span className="muted">Tasks assigned to you</span>
+              </div>
+            </div>
+            {state.user && state.tasks.filter((t) => t.assignedTo === state.user?.id).length === 0 && (
+              <p className="muted">No tasks assigned to you yet.</p>
+            )}
+            <div className="board">
+              {state.user &&
+                state.tasks
+                  .filter((t) => t.assignedTo === state.user?.id)
+                  .map((task) => (
+                    <div key={task._id} className="task-card">
+                      <div className="task-title">{task.title}</div>
+                      {task.description && <div className="task-desc">{task.description}</div>}
+                      <div className="task-meta">
+                        <span>Status: {task.status}</span>
+                        <span>Due: {new Date(task.dueDate).toLocaleDateString()}</span>
+                        {task.priority && <span>Priority {task.priority}</span>}
                       </div>
-                    ))}
-              </div>
+                    </div>
+                  ))}
             </div>
-          )}
+          </div>
+        )}
 
-          <div className="insights" style={{ marginTop: 8 }}>
+        <div className="insights" style={{ marginTop: 8 }}>
           <div className="pill tiny">
             <div className="pill-title">Open</div>
             <div className="pill-sub">{handlers.totals.open}</div>
@@ -1190,17 +1244,53 @@ function AppRoutes({
                   <span className="tag">{handlers.grouped[col].length}</span>
                 </div>
                 <div className="column-body">
-                  {handlers.grouped[col].map((task) => (
-                    <div key={task._id} className="task-card">
-                      <div className="task-title">{task.title}</div>
-                      {task.description && <div className="task-desc">{task.description}</div>}
-                      <div className="task-meta">
-                        <span>Due {new Date(task.dueDate).toLocaleDateString()}</span>
-                        {task.priority && <span>Priority {task.priority}</span>}
-                        {task.assignedTo && <span>Assignee: {handlers.userMap[task.assignedTo]?.name || '—'}</span>}
+                  {handlers.grouped[col].map((task) => {
+                    const subtasks = state.tasks.filter(t => t.parentTaskId === task._id);
+                    return (
+                      <div key={task._id} className="task-card">
+                        <div className="task-title">{task.title}</div>
+                        {task.description && <div className="task-desc">{task.description}</div>}
+                        <div className="task-meta">
+                          <span>Due {new Date(task.dueDate).toLocaleDateString()}</span>
+                          {task.priority && <span>Priority {task.priority}</span>}
+                          {task.assignedTo && <span>Assignee: {handlers.userMap[task.assignedTo]?.name || '—'}</span>}
+                          {task.estimatedHours && <span>{task.estimatedHours}h</span>}
+                        </div>
+
+                        {subtasks.length > 0 && (
+                          <div style={{ marginTop: 8, paddingLeft: 8, borderLeft: '2px solid #eee' }}>
+                            <div className="tiny" style={{ marginBottom: 4 }}>Subtasks:</div>
+                            {subtasks.map(st => (
+                              <div key={st._id} style={{ fontSize: '0.85rem', marginBottom: 2 }}>
+                                • {st.title} ({st.status})
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {isSenior && !task.parentTaskId && (
+                          <button className="small" style={{ marginTop: 8, width: '100%' }} onClick={() => {
+                            const t = prompt('Subtask title:');
+                            const h = prompt('Hours:');
+                            if (t) {
+                              handlers.authFetch(`${handlers.apiBase}/tasks`, {
+                                method: 'POST',
+                                body: JSON.stringify({
+                                  title: t,
+                                  parentTaskId: task._id,
+                                  estimatedHours: Number(h),
+                                  dueDate: task.dueDate,
+                                  status: 'TODO',
+                                  priority: task.priority,
+                                  orgId: task.orgId
+                                })
+                              }).then(() => handlers.fetchTasks());
+                            }
+                          }}>+ Break down</button>
+                        )}
                       </div>
-                    </div>
-                  ))}
+                    )
+                  })}
                   {handlers.grouped[col].length === 0 && <div className="empty">No items</div>}
                 </div>
               </div>
@@ -1458,6 +1548,21 @@ function AppRoutes({
           </div>
         ))}
       </div>
+
+      <div className="list-table" style={{ marginTop: 24 }}>
+        <div className="list-head">
+          <span>Report Performance</span>
+          <span>Reports submitted</span>
+          <span>Avg Grade</span>
+        </div>
+        {(state.summary.reportStats || []).map((row: any) => (
+          <div key={row._id || 'unassigned'} className="list-row">
+            <span className="task-title">{handlers.userMap[row._id]?.name || 'Unknown'}</span>
+            <span>{row.count}</span>
+            <span>{typeof row.avgGrade === 'number' ? Math.round(row.avgGrade) : '-'}</span>
+          </div>
+        ))}
+      </div>
     </section>
   );
 
@@ -1524,11 +1629,91 @@ function AppRoutes({
         return progressView;
       case 'chat':
         return chatView;
+      case 'reports':
+        return reportsView;
       case 'tasks':
       default:
         return taskPanel;
     }
   };
+
+  const reportsView = (
+    <section className="panel">
+      <div className="panel-header">
+        <h2>Reports</h2>
+        <span className="muted">Request and submit reports.</span>
+      </div>
+      <div className="cols">
+        {(state.user?.role === 'owner' || state.user?.role === 'senior') && (
+          <div className="field">
+            <h3>Request Report</h3>
+            <div className="cols">
+              <div className="field">
+                <label>From</label>
+                <select id="rep-recipient" onChange={(e) => {
+                  const recipientId = e.target.value;
+                  const msg = prompt('Message for request?');
+                  if (recipientId && msg) {
+                    handlers.authFetch(`${handlers.apiBase}/reports`, {
+                      method: 'POST',
+                      body: JSON.stringify({ responderId: recipientId, requestMessage: msg }),
+                    }).then(() => handlers.fetchReports());
+                  }
+                }}>
+                  <option value="">Select employee</option>
+                  {handlers.allowedAssignees.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                </select>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="list-table">
+        <div className="list-head">
+          <span>From</span>
+          <span>To</span>
+          <span>Request</span>
+          <span>Response</span>
+          <span>Status</span>
+          <span>Action</span>
+        </div>
+        {state.reports.map(r => (
+          <div key={r._id} className="list-row">
+            <span>{handlers.userMap[r.requesterId]?.name}</span>
+            <span>{handlers.userMap[r.responderId]?.name}</span>
+            <span>{r.requestMessage}</span>
+            <span>{r.responseMessage || '-'}</span>
+            <span className="chip">{r.status}</span>
+            <span>
+              {r.status === 'REQUESTED' && r.responderId === state.user?.id && (
+                <button className="small" onClick={() => {
+                  const resp = prompt('Enter your report:');
+                  if (resp) {
+                    handlers.authFetch(`${handlers.apiBase}/reports/${r._id}/submit`, {
+                      method: 'PATCH',
+                      body: JSON.stringify({ responseMessage: resp })
+                    }).then(() => handlers.fetchReports());
+                  }
+                }}>Submit</button>
+              )}
+              {r.status === 'SUBMITTED' && r.requesterId === state.user?.id && (
+                <button className="small" onClick={() => {
+                  const grade = prompt('Grade (0-100):');
+                  if (grade) {
+                    handlers.authFetch(`${handlers.apiBase}/reports/${r._id}/review`, {
+                      method: 'PATCH',
+                      body: JSON.stringify({ grade: Number(grade) })
+                    }).then(() => handlers.fetchReports());
+                  }
+                }}>Review</button>
+              )}
+            </span>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
 
   const appShell = (
     <div className="shell">
@@ -1568,6 +1753,12 @@ function AppRoutes({
           >
             Progress
           </button>
+          <button
+            className={`nav-item ${state.activeMenu === 'reports' ? 'active' : ''}`}
+            onClick={() => actions.setActiveMenu('reports')}
+          >
+            Reports
+          </button>
           <button className={`nav-item ${state.activeMenu === 'chat' ? 'active' : ''}`} onClick={() => actions.setActiveMenu('chat')}>
             Chat
           </button>
@@ -1602,7 +1793,7 @@ function AppRoutes({
           {state.info && <p className="info">{state.info}</p>}
         </main>
       </div>
-    </div>
+    </div >
   );
 
   return (
